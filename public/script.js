@@ -13,6 +13,11 @@ let manifestData = {
   releaseVersion: 1
 };
 
+// ACARS Message Log
+let messageLog = [];
+let autoPollInterval = null;
+let isConnected = false;
+
 // Event listeners
 document.getElementById("fetchBtn").addEventListener("click", fetchSummary);
 document.getElementById("takeoffBtn").addEventListener("click", printTakeoffData);
@@ -22,7 +27,11 @@ document.getElementById("finalWeightBtn").addEventListener("click", printFinalWe
 document.getElementById("departureAtisBtn").addEventListener("click", printDepartureATIS);
 document.getElementById("arrivalAtisBtn").addEventListener("click", printArrivalATIS);
 document.getElementById("sendBtn").addEventListener("click", sendHoppie);
-document.getElementById("pollBtn").addEventListener("click", pollHoppie);
+document.getElementById("connectBtn").addEventListener("click", toggleConnection);
+document.getElementById("clearBtn").addEventListener("click", clearMessage);
+document.getElementById("autoPollBtn").addEventListener("click", toggleAutoPoll);
+document.getElementById("clearLogBtn").addEventListener("click", clearLog);
+document.getElementById("exportLogBtn").addEventListener("click", exportLog);
 
 // SimBrief Functions
 async function fetchSummary() {
@@ -207,11 +216,14 @@ Aircraft #: ${aircraftnumber}`;
 
       printWindow(output);
       status.textContent = "Printed successfully.";
+      addLogEntry('system', null, null, null, 'Flight summary fetched and printed successfully.');
     } else {
       status.textContent = "Error: " + (data.error || "Failed to fetch flight data");
+      addLogEntry('error', null, null, null, `SimBrief fetch failed: ${data.error || 'Unknown error'}`, true);
     }
   } catch (err) {
     status.textContent = "Error: " + err.message;
+    addLogEntry('error', null, null, null, `SimBrief error: ${err.message}`, true);
   }
 }
 
@@ -709,6 +721,163 @@ function printWindow(content) {
   newWindow.print();
 }
 
+// ACARS Log Functions
+function addLogEntry(type, from, to, messageType, message, isError = false) {
+  const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
+  const entry = {
+    timestamp,
+    type,
+    from,
+    to,
+    messageType,
+    message,
+    isError
+  };
+  
+  messageLog.push(entry);
+  updateLogDisplay();
+  
+  // Auto-scroll to bottom
+  const logContainer = document.getElementById('acarsLog');
+  logContainer.scrollTop = logContainer.scrollHeight;
+}
+
+function updateLogDisplay() {
+  const logContainer = document.getElementById('acarsLog');
+  logContainer.innerHTML = '';
+  
+  messageLog.forEach(entry => {
+    const logEntry = document.createElement('div');
+    logEntry.className = `log-entry ${entry.type}${entry.isError ? ' error' : ''}`;
+    
+    let content = `<span class="timestamp">[${entry.timestamp}]</span>`;
+    
+    if (entry.from && entry.to) {
+      content += `<span class="from-to">${entry.from} → ${entry.to}</span>`;
+    }
+    
+    if (entry.messageType) {
+      content += `<span class="message-type">[${entry.messageType.toUpperCase()}]</span>`;
+    }
+    
+    content += `<span class="message">${escapeHtml(entry.message)}</span>`;
+    
+    logEntry.innerHTML = content;
+    logContainer.appendChild(logEntry);
+  });
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function clearLog() {
+  messageLog = [];
+  addLogEntry('system', null, null, null, 'Log cleared by user.');
+}
+
+function exportLog() {
+  const logText = messageLog.map(entry => {
+    return `[${entry.timestamp}] ${entry.from || ''} ${entry.to ? '→ ' + entry.to : ''} [${entry.messageType || 'SYSTEM'}] ${entry.message}`;
+  }).join('\n');
+  
+  const blob = new Blob([logText], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `acars_log_${new Date().toISOString().split('T')[0]}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+  
+  addLogEntry('system', null, null, null, 'Log exported successfully.');
+}
+
+function updateConnectionStatus(connected) {
+  isConnected = connected;
+  const indicator = document.getElementById('statusIndicator');
+  const statusText = document.getElementById('statusText');
+  
+  if (connected) {
+    indicator.classList.add('connected');
+    statusText.textContent = 'CONNECTED';
+    addLogEntry('system', null, null, null, 'ACARS connection established.');
+  } else {
+    indicator.classList.remove('connected');
+    statusText.textContent = 'DISCONNECTED';
+    addLogEntry('system', null, null, null, 'ACARS connection closed.');
+  }
+}
+
+function toggleConnection() {
+  const logon = document.getElementById('hoppie-logon').value;
+  const fromCallsign = document.getElementById('from-callsign').value;
+  const toCallsign = document.getElementById('to-callsign').value;
+  
+  if (!isConnected) {
+    if (!logon || !fromCallsign || !toCallsign) {
+      addLogEntry('system', null, null, null, 'Error: Please fill in logon code and callsigns.', true);
+      return;
+    }
+    updateConnectionStatus(true);
+    document.getElementById('connectBtn').textContent = 'Disconnect';
+    // Start auto-polling if enabled
+    if (autoPollInterval) {
+      startAutoPoll();
+    }
+  } else {
+    updateConnectionStatus(false);
+    document.getElementById('connectBtn').textContent = 'Connect';
+    stopAutoPoll();
+  }
+}
+
+function toggleAutoPoll() {
+  if (autoPollInterval) {
+    stopAutoPoll();
+    document.getElementById('autoPollBtn').textContent = 'Auto Poll';
+    addLogEntry('system', null, null, null, 'Auto-polling disabled.');
+  } else {
+    if (!isConnected) {
+      addLogEntry('system', null, null, null, 'Error: Please connect first.', true);
+      return;
+    }
+    startAutoPoll();
+    document.getElementById('autoPollBtn').textContent = 'Stop Poll';
+    addLogEntry('system', null, null, null, 'Auto-polling enabled (45-75s interval).');
+  }
+}
+
+function startAutoPoll() {
+  if (autoPollInterval) return;
+  
+  // Random interval between 45-75 seconds as per HOPPIE recommendations
+  const pollInterval = () => {
+    const minInterval = 45000; // 45 seconds
+    const maxInterval = 75000; // 75 seconds
+    const interval = Math.floor(Math.random() * (maxInterval - minInterval + 1)) + minInterval;
+    
+    autoPollInterval = setTimeout(() => {
+      pollHoppie();
+      pollInterval(); // Schedule next poll
+    }, interval);
+  };
+  
+  pollInterval();
+}
+
+function stopAutoPoll() {
+  if (autoPollInterval) {
+    clearTimeout(autoPollInterval);
+    autoPollInterval = null;
+  }
+}
+
+function clearMessage() {
+  document.getElementById('acars-message').value = '';
+}
+
 // HOPPIE ACARS Functions
 async function sendHoppie() {
   const logon = document.getElementById('hoppie-logon').value;
@@ -718,12 +887,11 @@ async function sendHoppie() {
   const message = document.getElementById('acars-message').value;
   
   if (!logon || !fromCallsign || !toCallsign || !message) {
-    document.getElementById('hoppie-status').textContent = 'Error: Please fill in all required fields';
+    addLogEntry('system', null, null, null, 'Error: Please fill in all required fields.', true);
     return;
   }
   
-  const statusBox = document.getElementById('hoppie-status');
-  statusBox.textContent = 'Sending message via HOPPIE ACARS...';
+  addLogEntry('sent', fromCallsign, toCallsign, messageType, message);
   
   try {
     const response = await fetch('/api/hoppie/send', {
@@ -743,13 +911,13 @@ async function sendHoppie() {
     const data = await response.json();
     
     if (data.success) {
-      statusBox.textContent = 'Success: ' + data.message;
+      addLogEntry('system', null, null, null, `Message sent successfully to ${toCallsign}.`);
       document.getElementById('acars-message').value = '';
     } else {
-      statusBox.textContent = 'Error: ' + (data.error || 'Unknown error');
+      addLogEntry('error', fromCallsign, toCallsign, messageType, `Send failed: ${data.error || 'Unknown error'}`, true);
     }
   } catch (error) {
-    statusBox.textContent = 'Error: ' + error.message;
+    addLogEntry('error', fromCallsign, toCallsign, messageType, `Send error: ${error.message}`, true);
   }
 }
 
@@ -758,12 +926,9 @@ async function pollHoppie() {
   const callsign = document.getElementById('from-callsign').value || document.getElementById('to-callsign').value;
   
   if (!logon || !callsign) {
-    document.getElementById('hoppie-status').textContent = 'Error: Please enter logon code and callsign';
+    addLogEntry('system', null, null, null, 'Error: Please enter logon code and callsign', true);
     return;
   }
-  
-  const statusBox = document.getElementById('hoppie-status');
-  statusBox.textContent = 'Polling HOPPIE ACARS for messages...';
   
   try {
     const response = await fetch('/api/hoppie/poll', {
@@ -781,18 +946,16 @@ async function pollHoppie() {
     
     if (data.success) {
       if (data.messages && data.messages.length > 0) {
-        let messagesText = 'Received Messages:\n\n';
         data.messages.forEach(msg => {
-          messagesText += `From: ${msg.from}\nTo: ${msg.to}\nType: ${msg.type}\nMessage: ${msg.message}\n\n`;
+          addLogEntry('received', msg.from, msg.to, msg.type, msg.message);
         });
-        statusBox.textContent = messagesText;
-      } else {
-        statusBox.textContent = 'No new messages';
+        addLogEntry('system', null, null, null, `Received ${data.messages.length} message(s).`);
       }
+      // Don't log "no messages" to avoid spam during auto-polling
     } else {
-      statusBox.textContent = 'Error: ' + (data.error || 'Unknown error');
+      addLogEntry('error', null, null, null, `Poll failed: ${data.error || 'Unknown error'}`, true);
     }
   } catch (error) {
-    statusBox.textContent = 'Error: ' + error.message;
+    addLogEntry('error', null, null, null, `Poll error: ${error.message}`, true);
   }
 }

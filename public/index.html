@@ -3,55 +3,94 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Dispatch ACARS Summary</title>
+  <title>RealACARS - Airline Operations Portal</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <div class="container">
-    <h2>Dispatch ACARS Summary</h2>
-    
-    <!-- SimBrief Section -->
-    <div class="form-group">
-      <input id="username" placeholder="Enter SimBrief Username" />
-      <button id="fetchBtn" class="btn-primary">Fetch Summary</button>
-    </div>
-    <div class="form-group">
-      <button id="takeoffBtn" class="btn-action">Takeoff Data</button>
-      <button id="landingBtn" class="btn-action">Landing Data</button>
-    </div>
-    <div class="form-group">
-      <button id="takeoffPerfBtn" class="btn-action">Takeoff Performance Card</button>
-      <button id="finalWeightBtn" class="btn-action">Final Weight Manifest</button>
-    </div>
-    <div class="form-group">
-      <button id="departureAtisBtn" class="btn-action">Departure ATIS</button>
-      <button id="arrivalAtisBtn" class="btn-action">Arrival ATIS</button>
-    </div>
-    <div id="status"></div>
+  <div class="main-container">
+    <!-- Header -->
+    <header class="acars-header">
+      <div class="header-left">
+        <h1>RealACARS</h1>
+        <span class="version">v7.3.2</span>
+      </div>
+      <div class="header-right">
+        <div class="connection-status" id="connectionStatus">
+          <span class="status-indicator" id="statusIndicator"></span>
+          <span id="statusText">DISCONNECTED</span>
+        </div>
+      </div>
+    </header>
 
-    <!-- HOPPIE ACARS Section -->
-    <div class="acars-section">
-      <h3>HOPPIE ACARS Communication</h3>
-      <div class="form-group">
-        <input id="hoppie-logon" placeholder="HOPPIE Logon Code" />
+    <!-- Main Content Area -->
+    <div class="content-wrapper">
+      <!-- Left Panel: SimBrief & Controls -->
+      <div class="left-panel">
+        <div class="panel-section">
+          <h3>SimBrief Flight Data</h3>
+          <div class="form-group">
+            <input id="username" placeholder="SimBrief Username" />
+            <button id="fetchBtn" class="btn-primary">Fetch</button>
+          </div>
+          <div class="quick-buttons">
+            <button id="takeoffBtn" class="btn-small">Takeoff Data</button>
+            <button id="landingBtn" class="btn-small">Landing Data</button>
+            <button id="takeoffPerfBtn" class="btn-small">T/O Perf</button>
+            <button id="finalWeightBtn" class="btn-small">Weight Manifest</button>
+            <button id="departureAtisBtn" class="btn-small">Dep ATIS</button>
+            <button id="arrivalAtisBtn" class="btn-small">Arr ATIS</button>
+          </div>
+          <div id="status" class="status-box"></div>
+        </div>
+
+        <!-- ACARS Configuration -->
+        <div class="panel-section">
+          <h3>ACARS Configuration</h3>
+          <div class="form-group">
+            <input id="hoppie-logon" placeholder="HOPPIE Logon Code" />
+          </div>
+          <div class="form-group">
+            <input id="from-callsign" placeholder="From (e.g., OPS)" />
+            <input id="to-callsign" placeholder="To (e.g., AAL123)" />
+          </div>
+          <div class="form-group">
+            <select id="message-type">
+              <option value="telex">Telex</option>
+              <option value="ocl">OCL</option>
+              <option value="cpdlc">CPDLC</option>
+            </select>
+            <button id="connectBtn" class="btn-primary">Connect</button>
+          </div>
+        </div>
+
+        <!-- Message Composition -->
+        <div class="panel-section">
+          <h3>Compose Message</h3>
+          <textarea id="acars-message" rows="4" placeholder="Type your ACARS message here..."></textarea>
+          <div class="button-group">
+            <button id="sendBtn" class="btn-primary">Send</button>
+            <button id="clearBtn" class="btn-secondary">Clear</button>
+          </div>
+        </div>
       </div>
-      <div class="form-group">
-        <input id="from-callsign" placeholder="From Callsign (e.g., OPS)" />
-        <input id="to-callsign" placeholder="To Callsign (e.g., AAL123)" />
+
+      <!-- Right Panel: ACARS Message Log -->
+      <div class="right-panel">
+        <div class="acars-log-header">
+          <h3>ACARS Message Log</h3>
+          <div class="log-controls">
+            <button id="autoPollBtn" class="btn-small">Auto Poll</button>
+            <button id="clearLogBtn" class="btn-small">Clear Log</button>
+            <button id="exportLogBtn" class="btn-small">Export</button>
+          </div>
+        </div>
+        <div class="acars-log" id="acarsLog">
+          <div class="log-entry system">
+            <span class="timestamp">[SYSTEM]</span>
+            <span class="message">RealACARS initialized. Ready to connect.</span>
+          </div>
+        </div>
       </div>
-      <div class="form-group">
-        <select id="message-type">
-          <option value="telex">Telex</option>
-          <option value="ocl">OCL (Operational Control)</option>
-          <option value="cpdlc">CPDLC</option>
-        </select>
-        <textarea id="acars-message" rows="3" placeholder="Enter ACARS message..."></textarea>
-      </div>
-      <div class="form-group">
-        <button id="sendBtn" class="btn-primary">Send Message</button>
-        <button id="pollBtn" class="btn-secondary">Poll Messages</button>
-      </div>
-      <div id="hoppie-status"></div>
     </div>
   </div>
 
