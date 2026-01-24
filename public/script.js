@@ -17,6 +17,7 @@ let manifestData = {
 document.getElementById("fetchBtn").addEventListener("click", fetchSummary);
 document.getElementById("takeoffBtn").addEventListener("click", printTakeoffData);
 document.getElementById("landingBtn").addEventListener("click", printLandingData);
+document.getElementById("takeoffPerfBtn").addEventListener("click", printTakeoffPerformanceCard);
 document.getElementById("finalWeightBtn").addEventListener("click", printFinalWeightManifest);
 document.getElementById("departureAtisBtn").addEventListener("click", printDepartureATIS);
 document.getElementById("arrivalAtisBtn").addEventListener("click", printArrivalATIS);
