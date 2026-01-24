@@ -40,14 +40,33 @@ async function fetchSummary() {
       const flightData = data.data;
       currentFlightData = flightData;
       
-      // Extract data using the same structure as the original
+      // Extract data from nested XML structure
       const get = (key) => {
         const keys = key.split(' > ');
         let value = flightData;
+        
         for (const k of keys) {
-          value = value?.[k] || value?.[k.toLowerCase()] || value?.[k.toUpperCase()];
+          if (!value) return null;
+          
+          // Try different case variations
+          value = value[k] || value[k.toLowerCase()] || value[k.toUpperCase()] || 
+                  value[k.charAt(0).toUpperCase() + k.slice(1).toLowerCase()];
+          
+          // If value is an object with _text property, get the text
+          if (value && typeof value === 'object' && '_text' in value) {
+            value = value._text;
+          }
         }
-        return value?.trim() || "N/A";
+        
+        // Return string value or "N/A"
+        if (value && typeof value === 'string') {
+          return value.trim() || "N/A";
+        } else if (value && typeof value === 'object' && '_text' in value) {
+          return value._text.trim() || "N/A";
+        } else if (value) {
+          return String(value).trim() || "N/A";
+        }
+        return "N/A";
       };
 
       // Try to get values - handle different XML structures

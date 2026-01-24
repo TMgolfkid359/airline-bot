@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 import requests
+import xml.etree.ElementTree as ET
 
 app = Flask(__name__)
 
@@ -7,9 +8,40 @@ app = Flask(__name__)
 SIMBRIEF_API_URL = "https://www.simbrief.com/api/xml.fetcher.php"
 HOPPIE_ACARS_URL = "http://www.hoppie.nl/acars/system/connect.html"
 
+def parse_xml_to_dict(element):
+    """Recursively parse XML element to dictionary"""
+    result = {}
+    
+    # Add text content if present
+    if element.text and element.text.strip():
+        result['_text'] = element.text.strip()
+    
+    # Process child elements
+    for child in element:
+        tag = child.tag
+        if len(child) == 0:  # Leaf node
+            text = child.text.strip() if child.text else ''
+            # If tag already exists, make it a list
+            if tag in result:
+                if not isinstance(result[tag], list):
+                    result[tag] = [result[tag]]
+                result[tag].append(text)
+            else:
+                result[tag] = text
+        else:  # Has children
+            child_dict = parse_xml_to_dict(child)
+            if tag in result:
+                if not isinstance(result[tag], list):
+                    result[tag] = [result[tag]]
+                result[tag].append(child_dict)
+            else:
+                result[tag] = child_dict
+    
+    return result
+
 @app.route('/api/simbrief/fetch', methods=['POST', 'OPTIONS'])
 def fetch_simbrief():
-    """Fetch flight data from SimBrief API"""
+    """Fetch flight data from SimBrief API using official Navigraph API parameters"""
     if request.method == 'OPTIONS':
         return '', 200, {
             'Access-Control-Allow-Origin': '*',
@@ -19,50 +51,87 @@ def fetch_simbrief():
     
     try:
         data = request.get_json() or {}
-        username = data.get('username')
-        userid = data.get('userid')
         
-        if not username and not userid:
-            return jsonify({'error': 'Username or UserID required'}), 400
-        
-        # SimBrief API parameters
+        # Build SimBrief API parameters according to official documentation
+        # https://developers.navigraph.com/docs/simbrief/using-the-api
         params = {}
-        if username:
-            params['username'] = username
-        if userid:
-            params['userid'] = userid
         
-        # Optional parameters
-        if 'orig' in data:
-            params['orig'] = data['orig']
-        if 'dest' in data:
-            params['dest'] = data['dest']
-        if 'type' in data:
-            params['type'] = data['type']
-        if 'route' in data:
-            params['route'] = data['route']
+        # User identification (one of these is required)
+        if data.get('username'):
+            params['username'] = data['username']
+        elif data.get('userid'):
+            params['userid'] = data['userid']
+        elif data.get('static_id'):
+            params['static_id'] = data['static_id']
+            if data.get('userid'):
+                params['userid'] = data['userid']
+        else:
+            return jsonify({'error': 'Username, UserID, or Static ID required'}), 400
+        
+        # Minimum required parameters for generating new flight plans
+        if data.get('orig'):
+            params['orig'] = data['orig'].upper()
+        if data.get('dest'):
+            params['dest'] = data['dest'].upper()
+        if data.get('type'):
+            params['type'] = data['type'].upper()
+        
+        # Optional dispatch parameters
+        optional_params = [
+            'airline', 'fltnum', 'route', 'date', 'deph', 'depm',
+            'steh', 'stem', 'reg', 'fin', 'selcal', 'callsign',
+            'pax', 'altn', 'fl', 'cpt', 'dxname', 'pid', 'fuelfactor',
+            'manualzfw', 'addedfuel', 'addedfuel_units', 'contpct',
+            'resvrule', 'taxiout', 'taxiin', 'cargo', 'origrwy', 'destrwy',
+            'climb', 'descent', 'cruise', 'civalue', 'acdata', 'etopsrule',
+            'altn_count', 'altn_avoid', 'manualrmk', 'static_id'
+        ]
+        
+        for param in optional_params:
+            if param in data and data[param]:
+                params[param] = data[param]
+        
+        # Alternate airports (altn_1_id, altn_1_rwy, altn_1_route, etc.)
+        for i in range(1, 5):
+            for suffix in ['_id', '_rwy', '_route']:
+                key = f'altn_{i}{suffix}'
+                if key in data and data[key]:
+                    params[key] = data[key]
+        
+        # OFP Options
+        ofp_options = [
+            'planformat', 'units', 'navlog', 'etops', 'stepclimbs',
+            'tlr', 'notams', 'firnot', 'maps', 'omit_sids', 'omit_stars', 'find_sidstar'
+        ]
+        
+        for option in ofp_options:
+            if option in data:
+                params[option] = data[option]
         
         # Make request to SimBrief API
         response = requests.get(SIMBRIEF_API_URL, params=params, timeout=30)
         
         if response.status_code == 200:
-            # Parse XML response
-            import xml.etree.ElementTree as ET
-            root = ET.fromstring(response.content)
-            
-            # Convert XML to dictionary for easier handling
-            flight_data = {}
-            for child in root:
-                flight_data[child.tag] = child.text
-            
-            return jsonify({
-                'success': True,
-                'data': flight_data
-            }), 200, {'Access-Control-Allow-Origin': '*'}
+            try:
+                # Parse XML response
+                root = ET.fromstring(response.content)
+                
+                # Convert XML to nested dictionary
+                flight_data = parse_xml_to_dict(root)
+                
+                return jsonify({
+                    'success': True,
+                    'data': flight_data
+                }), 200, {'Access-Control-Allow-Origin': '*'}
+            except ET.ParseError as e:
+                return jsonify({
+                    'error': f'XML parsing error: {str(e)}',
+                    'raw_response': response.text[:500]
+                }), 500, {'Access-Control-Allow-Origin': '*'}
         else:
             return jsonify({
                 'error': f'SimBrief API error: {response.status_code}',
-                'details': response.text
+                'details': response.text[:500]
             }), response.status_code, {'Access-Control-Allow-Origin': '*'}
             
     except Exception as e:
