@@ -1,106 +1,56 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Airline Operations Portal</title>
-    <link rel="stylesheet" href="/style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dispatch ACARS Summary</title>
+  <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-    <div class="container">
-        <header class="header">
-            <div class="logo">
-                <h1>✈️ Airline Operations</h1>
-                <p>Flight Dispatch & ACARS Management</p>
-            </div>
-        </header>
-
-        <div class="main-content">
-            <!-- SimBrief Flight Data Section -->
-            <section class="card">
-                <h2>📋 SimBrief Flight Data</h2>
-                <div class="form-group">
-                    <label for="simbrief-username">SimBrief Username:</label>
-                    <input type="text" id="simbrief-username" placeholder="Enter your SimBrief username">
-                </div>
-                <div class="form-group">
-                    <label for="simbrief-userid">Or SimBrief User ID:</label>
-                    <input type="text" id="simbrief-userid" placeholder="Enter your SimBrief User ID">
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="origin">Origin (ICAO):</label>
-                        <input type="text" id="origin" placeholder="e.g., KJFK" maxlength="4">
-                    </div>
-                    <div class="form-group">
-                        <label for="destination">Destination (ICAO):</label>
-                        <input type="text" id="destination" placeholder="e.g., EGLL" maxlength="4">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="aircraft-type">Aircraft Type:</label>
-                        <input type="text" id="aircraft-type" placeholder="e.g., B738">
-                    </div>
-                    <div class="form-group">
-                        <label for="route">Route (Optional):</label>
-                        <input type="text" id="route" placeholder="e.g., DCT">
-                    </div>
-                </div>
-                <button class="btn btn-primary" onclick="fetchSimBrief()">Fetch Flight Plan</button>
-                <div id="simbrief-result" class="result-box"></div>
-            </section>
-
-            <!-- HOPPIE ACARS Section -->
-            <section class="card">
-                <h2>📡 HOPPIE ACARS Communication</h2>
-                <div class="form-group">
-                    <label for="hoppie-logon">HOPPIE Logon Code:</label>
-                    <input type="text" id="hoppie-logon" placeholder="Your HOPPIE logon code">
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="from-callsign">From Callsign:</label>
-                        <input type="text" id="from-callsign" placeholder="e.g., OPS">
-                    </div>
-                    <div class="form-group">
-                        <label for="to-callsign">To Callsign:</label>
-                        <input type="text" id="to-callsign" placeholder="e.g., AAL123">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label for="message-type">Message Type:</label>
-                    <select id="message-type">
-                        <option value="telex">Telex</option>
-                        <option value="ocl">OCL (Operational Control)</option>
-                        <option value="cpdlc">CPDLC</option>
-                        <option value="poll">Poll</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="acars-message">Message:</label>
-                    <textarea id="acars-message" rows="4" placeholder="Enter your ACARS message here..."></textarea>
-                </div>
-                <div class="button-group">
-                    <button class="btn btn-primary" onclick="sendHoppie()">Send Message</button>
-                    <button class="btn btn-secondary" onclick="pollHoppie()">Poll for Messages</button>
-                </div>
-                <div id="hoppie-result" class="result-box"></div>
-            </section>
-
-            <!-- Quick Actions Section -->
-            <section class="card">
-                <h2>⚡ Quick Actions</h2>
-                <div class="quick-actions">
-                    <button class="btn btn-action" onclick="sendFlightPlan()">Send Flight Plan to Aircraft</button>
-                    <button class="btn btn-action" onclick="sendWeather()">Request Weather Update</button>
-                    <button class="btn btn-action" onclick="sendClearance()">Request Clearance</button>
-                </div>
-            </section>
-        </div>
+  <div class="container">
+    <h2>Dispatch ACARS Summary</h2>
+    
+    <!-- SimBrief Section -->
+    <div class="form-group">
+      <input id="username" placeholder="Enter SimBrief Username" />
+      <button id="fetchBtn" class="btn-primary">Fetch Summary</button>
     </div>
+    <div class="form-group">
+      <button id="takeoffBtn" class="btn-action">Takeoff Data</button>
+      <button id="landingBtn" class="btn-action">Landing Data</button>
+    </div>
+    <div class="form-group">
+      <button id="departureAtisBtn" class="btn-action">Departure ATIS</button>
+      <button id="arrivalAtisBtn" class="btn-action">Arrival ATIS</button>
+    </div>
+    <div id="status"></div>
 
-    <script src="/script.js"></script>
+    <!-- HOPPIE ACARS Section -->
+    <div class="acars-section">
+      <h3>HOPPIE ACARS Communication</h3>
+      <div class="form-group">
+        <input id="hoppie-logon" placeholder="HOPPIE Logon Code" />
+      </div>
+      <div class="form-group">
+        <input id="from-callsign" placeholder="From Callsign (e.g., OPS)" />
+        <input id="to-callsign" placeholder="To Callsign (e.g., AAL123)" />
+      </div>
+      <div class="form-group">
+        <select id="message-type">
+          <option value="telex">Telex</option>
+          <option value="ocl">OCL (Operational Control)</option>
+          <option value="cpdlc">CPDLC</option>
+        </select>
+        <textarea id="acars-message" rows="3" placeholder="Enter ACARS message..."></textarea>
+      </div>
+      <div class="form-group">
+        <button id="sendBtn" class="btn-primary">Send Message</button>
+        <button id="pollBtn" class="btn-secondary">Poll Messages</button>
+      </div>
+      <div id="hoppie-status"></div>
+    </div>
+  </div>
+
+  <script src="/script.js"></script>
 </body>
 </html>
-
