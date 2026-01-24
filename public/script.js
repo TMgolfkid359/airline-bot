@@ -5,10 +5,19 @@ let depWeather = "N/A";
 let arrWeather = "N/A";
 let currentFlightData = null;
 
+// Final Weight Manifest data storage
+let manifestData = {
+  seq: 1,
+  towChange: null,
+  previousTOW: null,
+  releaseVersion: 1
+};
+
 // Event listeners
 document.getElementById("fetchBtn").addEventListener("click", fetchSummary);
 document.getElementById("takeoffBtn").addEventListener("click", printTakeoffData);
 document.getElementById("landingBtn").addEventListener("click", printLandingData);
+document.getElementById("finalWeightBtn").addEventListener("click", printFinalWeightManifest);
 document.getElementById("departureAtisBtn").addEventListener("click", printDepartureATIS);
 document.getElementById("arrivalAtisBtn").addEventListener("click", printArrivalATIS);
 document.getElementById("sendBtn").addEventListener("click", sendHoppie);
@@ -106,6 +115,40 @@ async function fetchSummary() {
       const altElev = get("alternate > elevation") || "N/A";
       const cargo = get("weights > cargo") || get("cargo") || "N/A";
 
+      // Extract additional data for Final Weight Manifest
+      const rampWeight = get("weights > est_ramp") || get("weights > ramp") || "N/A";
+      const takeoffFuel = get("fuel > plan_takeoff") || get("fuel > takeoff") || "N/A";
+      const taxiFuel = get("fuel > plan_taxi") || get("fuel > taxi") || "N/A";
+      const tow = get("weights > est_tow") || get("weights > tow") || takeoffWeight.replace(/[^0-9.]/g, '');
+      const cg = get("weights > cg") || get("weights > percent_cg") || get("weights > cg_percent") || "N/A";
+      const trim = get("weights > trim") || get("weights > trim_setting") || "N/A";
+
+      // Passenger breakdown (try to get first/coach split)
+      const paxFirst = get("general > pax_first") || get("pax_first") || "0";
+      const paxCoach = get("general > pax_coach") || get("pax_coach") || pax;
+      const totalPax = (parseInt(paxFirst) || 0) + (parseInt(paxCoach) || parseInt(pax) || 0);
+
+      // Crew data
+      const fas = get("crew > fa") || get("crew > cabin_crew") || get("crew > flight_attendants") || "N/A";
+      const pilots = (Captain !== "N/A" && FirstOfficer !== "N/A") ? "2" : "N/A";
+
+      // Store manifest data
+      manifestData.currentTOW = tow;
+      manifestData.rampWeight = rampWeight;
+      manifestData.takeoffFuel = takeoffFuel;
+      manifestData.taxiFuel = taxiFuel;
+      manifestData.zfw = zfw;
+      manifestData.cg = cg;
+      manifestData.trim = trim;
+      manifestData.paxFirst = paxFirst;
+      manifestData.paxCoach = paxCoach;
+      manifestData.totalPax = totalPax;
+      manifestData.pilots = pilots;
+      manifestData.fas = fas;
+      manifestData.airline = airline;
+      manifestData.flightNumber = flightNumber;
+      manifestData.registration = registration;
+
       // Calculate weights if available
       if (blockFuel !== "N/A" && zfw !== "N/A") {
         const fuelNum = parseFloat(blockFuel.replace(/[^0-9.]/g, ''));
@@ -183,6 +226,132 @@ async function printLandingData() {
 
 Landing Weight: ${landingWeight}`;
   printWindow(output);
+}
+
+async function printFinalWeightManifest() {
+  if (!currentFlightData) {
+    document.getElementById("status").textContent = "Error: Please fetch flight data first.";
+    return;
+  }
+
+  const get = (key) => {
+    const keys = key.split(' > ');
+    let value = currentFlightData;
+    
+    for (const k of keys) {
+      if (!value) return null;
+      value = value[k] || value[k.toLowerCase()] || value[k.toUpperCase()] || 
+              value[k.charAt(0).toUpperCase() + k.slice(1).toLowerCase()];
+      
+      if (value && typeof value === 'object' && '_text' in value) {
+        value = value._text;
+      }
+    }
+    
+    if (value && typeof value === 'string') {
+      return value.trim() || "N/A";
+    } else if (value && typeof value === 'object' && '_text' in value) {
+      return value._text.trim() || "N/A";
+    } else if (value) {
+      return String(value).trim() || "N/A";
+    }
+    return "N/A";
+  };
+
+  // Get current timestamp
+  const now = new Date();
+  const timestamp = now.toISOString().substr(11, 8) + "Z";
+  const monthNames = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+  const dateFormatted = now.getDate().toString().padStart(2, '0') + monthNames[now.getMonth()] + now.getFullYear().toString().substr(2);
+
+  // Calculate TOW Change (if previous TOW exists)
+  let towChange = "N/A";
+  if (manifestData.previousTOW && manifestData.currentTOW) {
+    const prev = parseFloat(manifestData.previousTOW.toString().replace(/[^0-9.-]/g, ''));
+    const curr = parseFloat(manifestData.currentTOW.toString().replace(/[^0-9.-]/g, ''));
+    if (!isNaN(prev) && !isNaN(curr)) {
+      const change = curr - prev;
+      towChange = change >= 0 ? `+${change.toFixed(0)}` : change.toFixed(0);
+      // If change exceeds threshold, show "CALL DD"
+      if (Math.abs(change) > 2000) {
+        towChange = "CALL DD";
+      }
+    }
+  }
+
+  // Extract numeric values
+  const towNum = parseFloat(manifestData.currentTOW.toString().replace(/[^0-9.]/g, ''));
+  const zfwNum = parseFloat(manifestData.zfw.toString().replace(/[^0-9.]/g, ''));
+  const paxNum = parseInt(manifestData.totalPax) || 0;
+  const pilotsNum = parseInt(manifestData.pilots) || 0;
+  const fasNum = parseInt(manifestData.fas.toString().replace(/[^0-9]/g, '')) || 0;
+  
+  // Calculate SOB (Souls On Board)
+  // SOB = Passengers + Lap Infants + Pilots + Flight Attendants
+  const lapInfants = 0; // Not available from SimBrief, default to 0
+  const kids = 0; // Not available from SimBrief, default to 0
+  const fdJumpseat = 0; // Not available from SimBrief, default to 0
+  const faJumpseat = 0; // Not available from SimBrief, default to 0
+  const sob = paxNum + lapInfants + pilotsNum + fasNum;
+
+  // Format registration for header (remove spaces, ensure format)
+  const regFormatted = manifestData.registration.replace(/\s/g, '').toUpperCase();
+  const regDisplay = regFormatted.startsWith('N') ? `.${regFormatted}` : `.${regFormatted}`;
+
+  // Format passenger display
+  const paxFirstNum = parseInt(manifestData.paxFirst) || 0;
+  const paxCoachNum = parseInt(manifestData.paxCoach) || 0;
+  const paxDisplay = paxFirstNum > 0 ? `${paxFirstNum}/${paxCoachNum}` : `${paxCoachNum}`;
+  const paxTotalDisplay = `-${paxNum}-`;
+
+  // Format CG and Trim
+  const cgDisplay = manifestData.cg !== "N/A" ? parseFloat(manifestData.cg.toString().replace(/[^0-9.]/g, '')).toFixed(1) : "N/A";
+  const trimDisplay = manifestData.trim !== "N/A" ? parseFloat(manifestData.trim.toString().replace(/[^0-9.]/g, '')).toFixed(1) : "N/A";
+
+  // Generate manifest in Boeing format
+  const manifest = `AN ${regDisplay}
+QUDPCULUA-1FINAL WEIGHTS
+
+1. ${manifestData.airline}${manifestData.flightNumber}/${manifestData.seq.toString().padStart(2, '0')}
+   SENT: ${timestamp}
+
+2. TOG: ${isNaN(towNum) ? "N/A" : Math.round(towNum).toString()}
+
+3. SEQ: ${manifestData.seq.toString().padStart(2, '0')}
+
+4. TOW CHG: ${towChange}
+
+5. ZFW: ${isNaN(zfwNum) ? manifestData.zfw : Math.round(zfwNum).toString()}
+
+6. CG: ${cgDisplay}%
+   TRIM ${trimDisplay}
+
+7. SOB: ${sob}
+
+8. PSGRS: ${paxDisplay}
+   ${paxTotalDisplay}
+
+9. LAP: ${lapInfants.toString().padStart(2, '0')}
+
+10. CREW: ${pilotsNum}/${fasNum}
+
+11. KIDS: ${kids.toString().padStart(2, '0')}
+
+12. FD JUMPSEAT: ${fdJumpseat}
+
+13. FA JUMPSEAT: ${faJumpseat}
+
+14. FLIGHT PLAN RELEASE: -${manifestData.releaseVersion}-
+
+15. FINAL DG SUMMARY (EPNF): ${dateFormatted}/${timestamp}`;
+
+  printWindow(manifest);
+  
+  // Increment sequence number for next manifest
+  manifestData.seq++;
+  manifestData.previousTOW = manifestData.currentTOW;
+  
+  document.getElementById("status").textContent = "Final Weight Manifest printed successfully.";
 }
 
 async function printDepartureATIS() {
