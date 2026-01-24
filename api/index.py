@@ -184,6 +184,8 @@ def poll_hoppie():
     except Exception as e:
         return jsonify({'error': str(e)}), 500, {'Access-Control-Allow-Origin': '*'}
 
-# Export app for Vercel
-# Vercel will automatically detect and use this Flask app
-__all__ = ['app']
+# Vercel serverless function handler
+def handler(request):
+    """Vercel serverless function handler"""
+    from vercel import Response
+    return Response(app, request)
