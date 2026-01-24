@@ -18,6 +18,11 @@ let messageLog = [];
 let autoPollInterval = null;
 let isConnected = false;
 
+// Initialize log on page load
+document.addEventListener('DOMContentLoaded', () => {
+  addLogEntry('system', null, null, null, 'RealACARS initialized. Ready to connect.');
+});
+
 // Event listeners
 document.getElementById("fetchBtn").addEventListener("click", fetchSummary);
 document.getElementById("takeoffBtn").addEventListener("click", printTakeoffData);
