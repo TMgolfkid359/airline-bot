@@ -229,6 +229,151 @@ Landing Weight: ${landingWeight}`;
   printWindow(output);
 }
 
+async function printTakeoffPerformanceCard() {
+  if (!currentFlightData) {
+    document.getElementById("status").textContent = "Error: Please fetch flight data first.";
+    return;
+  }
+
+  const get = (key) => {
+    const keys = key.split(' > ');
+    let value = currentFlightData;
+    
+    for (const k of keys) {
+      if (!value) return null;
+      value = value[k] || value[k.toLowerCase()] || value[k.toUpperCase()] || 
+              value[k.charAt(0).toUpperCase() + k.slice(1).toLowerCase()];
+      
+      if (value && typeof value === 'object' && '_text' in value) {
+        value = value._text;
+      }
+    }
+    
+    if (value && typeof value === 'string') {
+      return value.trim() || "N/A";
+    } else if (value && typeof value === 'object' && '_text' in value) {
+      return value._text.trim() || "N/A";
+    } else if (value) {
+      return String(value).trim() || "N/A";
+    }
+    return "N/A";
+  };
+
+  // Extract takeoff performance data
+  const depICAO = get("origin > icao_code") || get("origin") || "N/A";
+  const runway = get("origin > plan_rwy") || get("origin > rwy") || get("origrwy") || "[EDIT]";
+  const takeoffProc = get("origin > sid") || get("origin > departure_procedure") || "[EDIT]";
+  const initialAlt = get("general > initial_altitude") || get("altitude") || "N/A";
+  const aircraftType = get("aircraft > name") || get("aircraft") || "N/A";
+  const engines = get("aircraft > engines") || "[EDIT]";
+  
+  // Environmental data
+  const temp = get("origin > temp") || "[EDIT]";
+  const altimeter = get("origin > altimeter") || get("origin > qnh") || "[EDIT]";
+  const wind = get("origin > wind") || "[EDIT]";
+  const windDir = get("origin > wind_dir") || "[EDIT]";
+  const windSpd = get("origin > wind_spd") || "[EDIT]";
+  
+  // Calculate headwind/crosswind (simplified - would need runway heading)
+  const headwind = "[CALCULATE]";
+  const crosswind = "[CALCULATE]";
+  
+  // Weight and balance
+  const tow = get("weights > est_tow") || get("weights > tow") || manifestData.currentTOW || "[EDIT]";
+  const cg = get("weights > cg") || get("weights > percent_cg") || manifestData.cg || "[EDIT]";
+  const trim = get("weights > trim") || get("weights > trim_setting") || manifestData.trim || "[EDIT]";
+  const mtow = get("weights > mtow") || "[EDIT]";
+  
+  // Runway condition
+  const rwyCondition = get("origin > rwy_condition") || "[EDIT]";
+  
+  // Configuration (not in SimBrief - placeholders)
+  const flaps = "[EDIT]";
+  const bleeds = "[EDIT]";
+  const antiIce = "[EDIT]";
+  
+  // Assumed values
+  const assumedWeight = tow;
+  const assumedTemp = "[EDIT]";
+  
+  // Takeoff performance (if TLR enabled)
+  const v1 = get("takeoff > v1") || "[EDIT]";
+  const vr = get("takeoff > vr") || "[EDIT]";
+  const v2 = get("takeoff > v2") || "[EDIT]";
+  const vrMax = get("takeoff > vr_max") || "[EDIT]";
+  
+  // Altitudes
+  const thrRedAlt = get("takeoff > thr_red_alt") || get("takeoff > thrust_reduction_altitude") || "[EDIT]";
+  const thrRedAFE = get("takeoff > thr_red_afe") || "[CALCULATE]";
+  const accelAlt = get("takeoff > accel_alt") || get("takeoff > acceleration_altitude") || "[EDIT]";
+  const accelAFE = get("takeoff > accel_afe") || "[CALCULATE]";
+  const depElev = get("origin > elevation") || "0";
+  
+  // Departure procedure
+  const sid = get("origin > sid") || get("origin > departure_procedure") || "[EDIT]";
+  const departureInstructions = get("origin > departure_instructions") || "[EDIT]";
+  
+  // MEL/CDL (not in SimBrief)
+  const melCdl = "[EDIT]";
+  
+  // Partial runway codes (not in SimBrief)
+  const partialRunways = "[EDIT]";
+  
+  // Engine performance (not in SimBrief - placeholders)
+  const reducedEPRN1 = "[EDIT]";
+  const reducedEPRHW = "[EDIT]";
+  const reducedEPRV1 = "[EDIT]";
+  const reducedEPRVR = "[EDIT]";
+  const reducedEPRV2 = "[EDIT]";
+  
+  const maxEPRN1 = "[EDIT]";
+  const maxEPRTOG = tow;
+  const maxEPRV1 = v1;
+  const maxEPRVR = vr;
+  const maxEPRV2 = v2;
+  
+  // Format the takeoff performance card
+  const card = `T/O ${depICAO} ${runway} ${takeoffProc ? "*" + takeoffProc + "*" : ""}
+${initialAlt} FT
+${aircraftType} ${engines}
+TEMP ${temp} ALT ${altimeter}
+WIND ${windDir}/${windSpd} MAG
+${headwind}KT HW ${crosswind}KT XW
+TOCG/TRIM ${cg}/${trim}
+${rwyCondition}
+*FLAPS ${flaps}* *BLEEDS ${bleeds}* *ANTI-ICE ${antiIce}*
+ASSMD WT: ${assumedWeight}
+ASSMD TMP: ${assumedTemp}
+
+REDUCED EPR:
+N1    *HW*  V1   VR   V2
+${reducedEPRN1}   ${reducedEPRHW}   ${reducedEPRV1}   ${reducedEPRVR}   ${reducedEPRV2}
+
+TW EPR N1 ATMP V1/VR/V2
+0    ---00  30C  50/62/65
+5    ---01  27C  46/59/62
+10   N/A N/A
+
+MAX EPR:
+N1    TOG   V1   VR   V2
+${maxEPRN1}   ${maxEPRTOG}   ${maxEPRV1}   ${maxEPRVR}   ${maxEPRV2}
+
+THR RED ${thrRedAlt} (${thrRedAFE} AFE)
+ACC ALT ${accelAlt} (${accelAFE} AFE)
+
+MTOG ${mtow} VR MAX ${vrMax}
+MEL/CDL ${melCdl}
+
+PARTIAL RUNWAY CODES:
+${partialRunways}
+
+${departureInstructions ? "TRK " + departureInstructions : "[EDIT DEPARTURE INSTRUCTIONS]"}
+ACCEL ALT: ${accelAlt} MSL/ ${accelAFE} AFE.`;
+
+  printWindow(card);
+  document.getElementById("status").textContent = "Takeoff Performance Card generated. Edit as needed.";
+}
+
 async function printFinalWeightManifest() {
   if (!currentFlightData) {
     document.getElementById("status").textContent = "Error: Please fetch flight data first.";
