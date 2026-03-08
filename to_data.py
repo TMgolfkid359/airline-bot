@@ -4,7 +4,8 @@ Fields 1–25 align with the documented message layout (departure, env, reduced/
 """
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Any
+import re
 
 
 # --- Runway / airport ---
@@ -360,3 +361,174 @@ def make_example_to_data() -> TOData:
         ),
         message_identifier="737-7-001",
     )
+
+
+def _ofp_get(d: Any, path: str) -> Optional[Any]:
+    """Get nested value from OFP dict. Path like 'origin > icao_code'. Handles _text and key case."""
+    if d is None:
+        return None
+    keys = [k.strip() for k in path.split(">")]
+    value = d
+    for k in keys:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            return None
+        value = value.get(k) or value.get(k.lower()) or value.get(k.upper()) or value.get(k.capitalize())
+        if value is not None and isinstance(value, dict) and "_text" in value and len(value) == 1:
+            value = value["_text"]
+    if value is not None and isinstance(value, str):
+        value = value.strip() or None
+    return value
+
+
+def _ofp_num(s: Any) -> Optional[float]:
+    """Parse number from OFP string (strip non-numeric except . -)."""
+    if s is None:
+        return None
+    if isinstance(s, (int, float)) and not isinstance(s, bool):
+        return float(s)
+    raw = re.sub(r"[^\d.\-]", "", str(s))
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def to_data_from_ofp(flight_data: dict) -> TOData:
+    """
+    Build TOData from SimBrief OFP (Operational Flight Plan) flight_data.
+    Uses the same field paths as the frontend (origin > icao_code, takeoff > v1, etc.).
+    Missing or non-numeric values are left as None; message still formats with placeholders where applicable.
+    """
+    def get(path: str):
+        return _ofp_get(flight_data, path)
+
+    def get_any(*paths: str):
+        for p in paths:
+            v = get(p)
+            if v is not None and v != "" and (not isinstance(v, str) or v.upper() != "N/A"):
+                return v
+        return None
+
+    # Departure airport & runway (1)
+    airport = (
+        get_any("origin > icao_code", "origin > icao", "params > origin")
+        or get("origin")
+        or get("orig")
+        or ""
+    )
+    if isinstance(airport, dict):
+        airport = airport.get("_text") or airport.get("icao_code") or ""
+    airport = str(airport).strip() if airport else ""
+
+    runway_raw = get_any("origin > plan_rwy", "origin > rwy", "origin > runway", "params > origrwy", "origrwy")
+    runway = str(runway_raw).strip() if runway_raw is not None else ""
+    # T-PROC if SID/departure procedure exists
+    sid = get_any("origin > sid", "origin > departure_procedure", "origin > sid_name")
+    t_proc = bool(sid and str(sid).strip().upper() not in ("N/A", "[EDIT]", ""))
+
+    # Environment (3–8)
+    initial_alt = _ofp_num(get_any("general > initial_altitude", "params > altitude", "general > cruise_altitude"))
+    climb_altitude_ft = int(initial_alt) if initial_alt is not None else None
+
+    ac_name = get_any("aircraft > name", "aircraft > icao", "aircraft")
+    ac_eng = get_any("aircraft > engines", "aircraft > engine_type", "params > aircraft")
+    airplane_engine = f"{ac_name} {ac_eng}".strip() if (ac_name or ac_eng) else ""
+
+    temp_c = _ofp_num(get_any("origin > temp", "origin > temperature", "params > temp"))
+    altimeter_inhg = _ofp_num(get_any("origin > altimeter", "origin > qnh", "origin > pressure", "params > altimeter"))
+    wind_mag_deg = _ofp_num(get_any("origin > wind_dir", "origin > wind_direction", "params > wind_dir"))
+    wind_speed_kt = _ofp_num(get_any("origin > wind_spd", "origin > wind_speed", "params > wind_spd"))
+    headwind_kt = _ofp_num(get_any("origin > headwind", "params > headwind"))
+    crosswind_kt = _ofp_num(get_any("origin > crosswind", "params > crosswind"))
+    tocg = _ofp_num(get_any("weights > cg", "weights > percent_cg", "weights > cg_percent"))
+    trim_val = get_any("weights > trim", "weights > trim_setting", "weights > trim_value")
+    trim = str(trim_val).strip() if trim_val is not None else None
+    rwy_cond = get_any("origin > rwy_condition", "origin > runway_condition", "origin > surface") or "DRY"
+    if isinstance(rwy_cond, str) and rwy_cond.upper() in ("N/A", "[EDIT]"):
+        rwy_cond = "DRY"
+
+    # Configuration (9)
+    flaps_val = _ofp_num(get_any("takeoff > flaps", "takeoff > flap_setting", "params > flaps"))
+    flaps = int(flaps_val) if flaps_val is not None else 1
+    if flaps not in (1, 5, 10, 15, 25):
+        flaps = 1
+
+    # Assumed (10–11)
+    assumed_weight = _ofp_num(get_any("weights > est_tow", "weights > tow", "weights > takeoff_weight", "params > tow"))
+    assumed_temp_c = _ofp_num(get_any("takeoff > assumed_temp", "takeoff > flex_temp", "params > flex_temp"))
+
+    # Limits (19–22)
+    dep_elev = _ofp_num(get_any("origin > elevation", "origin > field_elevation")) or 0
+    thr_red = _ofp_num(get_any("takeoff > thr_red_alt", "takeoff > thrust_reduction_altitude", "takeoff > thr_red"))
+    acc_alt = _ofp_num(get_any("takeoff > accel_alt", "takeoff > acceleration_altitude", "takeoff > accel"))
+    thr_red_afe = int(thr_red - dep_elev) if (thr_red is not None and dep_elev is not None) else None
+    acc_alt_afe = int(acc_alt - dep_elev) if (acc_alt is not None and dep_elev is not None) else None
+    mtog = _ofp_num(get_any("weights > mtow", "weights > max_takeoff_weight", "aircraft > mtow"))
+    vr_max = _ofp_num(get_any("takeoff > vr_max", "takeoff > max_rotation"))
+
+    # V-speeds from takeoff block
+    v1 = _ofp_num(get_any("takeoff > v1", "takeoff > v1_speed"))
+    vr = _ofp_num(get_any("takeoff > vr", "takeoff > rotation_speed", "takeoff > vr_speed"))
+    v2 = _ofp_num(get_any("takeoff > v2", "takeoff > v2_speed"))
+    v1_int = int(v1) if v1 is not None else None
+    vr_int = int(vr) if vr is not None else None
+    v2_int = int(v2) if v2 is not None else None
+
+    reduced_na = not (v1_int and vr_int and v2_int)
+
+    to_data = TOData(
+        departure=DepartureRunway(airport=airport or "????", runway=runway or "??", t_proc=t_proc),
+        environment=TakeoffEnvironment(
+            climb_altitude_ft=climb_altitude_ft,
+            airplane_engine=airplane_engine,
+            temp_c=temp_c,
+            altimeter_inhg=altimeter_inhg,
+            wind_mag_deg=int(wind_mag_deg) if wind_mag_deg is not None else None,
+            wind_speed_kt=int(wind_speed_kt) if wind_speed_kt is not None else None,
+            headwind_kt=int(headwind_kt) if headwind_kt is not None else None,
+            crosswind_kt=int(crosswind_kt) if crosswind_kt is not None else None,
+            tocg=tocg,
+            trim=trim or "-.--",
+            runway_condition=rwy_cond,
+        ),
+        configuration=TakeoffConfiguration(flaps=flaps, bleeds_on=True, anti_ice_off=True),
+        assumed=AssumedConditions(assumed_weight=assumed_weight, assumed_temp_c=assumed_temp_c),
+        reduced_thrust_na=reduced_na,
+        limits=TakeoffLimits(
+            thr_red_ft_msl=int(thr_red) if thr_red is not None else None,
+            thr_red_afe_ft=thr_red_afe,
+            acc_alt_ft_msl=int(acc_alt) if acc_alt is not None else None,
+            acc_alt_afe_ft=acc_alt_afe,
+            mtog=mtog,
+            vr_max=int(vr_max) if vr_max is not None else None,
+        ),
+        notes=TakeoffNotes(
+            track_instructions=str(sid).strip() if sid else "",
+        ),
+    )
+
+    if not reduced_na and (v1_int and vr_int and v2_int):
+        to_data.reduced_epr_row = ReducedThrustRow(
+            headwind_kt=int(headwind_kt) if headwind_kt is not None else None,
+            v1=v1_int,
+            vr=vr_int,
+            v2=v2_int,
+        )
+        to_data.max_epr = MaxThrustData(
+            tog=assumed_weight,
+            v1=v1_int,
+            vr=vr_int,
+            v2=v2_int,
+        )
+        n1_reduced = _ofp_num(get_any("takeoff > reduced_epr_n1", "takeoff > reduced_n1"))
+        if n1_reduced is not None:
+            to_data.reduced_epr_row.n1 = n1_reduced
+        n1_max = _ofp_num(get_any("takeoff > max_epr_n1", "takeoff > max_n1"))
+        if n1_max is not None and to_data.max_epr:
+            to_data.max_epr.n1 = n1_max
+
+    return to_data

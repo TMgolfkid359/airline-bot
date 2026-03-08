@@ -18,6 +18,7 @@ from to_data import (
     PartialRunwayCode,
     TakeoffNotes,
     make_example_to_data,
+    to_data_from_ofp,
 )
 
 load_dotenv()
@@ -210,6 +211,24 @@ def to_data_build():
     try:
         data = request.json or {}
         to_data = _build_to_data_from_json(data)
+        return jsonify({
+            'success': True,
+            'message': to_data.to_acars_message(),
+            'lines': to_data.to_acars_lines(),
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/to-data/from-ofp', methods=['POST'])
+def to_data_from_ofp_route():
+    """Build ACARS Takeoff Data message from SimBrief OFP flight_data."""
+    try:
+        data = request.json or {}
+        flight_data = data.get('flight_data') or data.get('data')
+        if not flight_data:
+            return jsonify({'error': 'flight_data or data required (SimBrief OFP response)'}), 400
+        to_data = to_data_from_ofp(flight_data)
         return jsonify({
             'success': True,
             'message': to_data.to_acars_message(),

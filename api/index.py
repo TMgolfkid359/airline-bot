@@ -20,6 +20,7 @@ from to_data import (
     PartialRunwayCode,
     TakeoffNotes,
     make_example_to_data,
+    to_data_from_ofp,
 )
 
 app = Flask(__name__)
@@ -407,6 +408,30 @@ def to_data_build():
     try:
         data = request.get_json() or {}
         to_data = _build_to_data_from_json(data)
+        return jsonify({
+            'success': True,
+            'message': to_data.to_acars_message(),
+            'lines': to_data.to_acars_lines(),
+        }), 200, {'Access-Control-Allow-Origin': '*'}
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500, {'Access-Control-Allow-Origin': '*'}
+
+
+@app.route('/api/to-data/from-ofp', methods=['POST', 'OPTIONS'])
+def to_data_from_ofp_route():
+    """Build ACARS Takeoff Data message from SimBrief OFP flight_data."""
+    if request.method == 'OPTIONS':
+        return '', 200, {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+        }
+    try:
+        data = request.get_json() or {}
+        flight_data = data.get('flight_data') or data.get('data')
+        if not flight_data:
+            return jsonify({'error': 'flight_data or data required (SimBrief OFP response)'}), 400, {'Access-Control-Allow-Origin': '*'}
+        to_data = to_data_from_ofp(flight_data)
         return jsonify({
             'success': True,
             'message': to_data.to_acars_message(),

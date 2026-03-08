@@ -63,7 +63,21 @@ async function fetchSummary() {
     if (data.success) {
       const flightData = data.data;
       currentFlightData = flightData;
-      
+
+      // Build ACARS takeoff data from OFP and prefill message for sending
+      try {
+        const toResponse = await fetch('/api/to-data/from-ofp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: flightData })
+        });
+        const toResult = await toResponse.json();
+        if (toResult.success && toResult.message) {
+          lastTakeoffDataFromOFP = toResult.message;
+          document.getElementById("acars-message").value = toResult.message;
+        }
+      } catch (_) { /* non-fatal */ }
+
       // Extract data from nested XML structure
       const get = (key) => {
         const keys = key.split(' > ');
@@ -232,11 +246,33 @@ Aircraft #: ${aircraftnumber}`;
   }
 }
 
-async function printTakeoffData() {
-  const output = `------ TAKEOFF DATA ------
+// Last ACARS takeoff message built from OFP (for printing/sending)
+let lastTakeoffDataFromOFP = null;
 
-Takeoff Weight: ${takeoffWeight}`;
-  printWindow(output);
+async function printTakeoffData() {
+  if (!currentFlightData) {
+    document.getElementById("status").textContent = "Error: Please fetch flight data first.";
+    return;
+  }
+  try {
+    const response = await fetch('/api/to-data/from-ofp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: currentFlightData })
+    });
+    const result = await response.json();
+    if (!result.success) {
+      document.getElementById("status").textContent = "Error: " + (result.error || "Failed to build TO data from OFP");
+      return;
+    }
+    lastTakeoffDataFromOFP = result.message;
+    document.getElementById("acars-message").value = result.message;
+    const output = `------ ACARS TAKEOFF DATA (FROM OFP) ------\n\n${result.message}`;
+    printWindow(output);
+    document.getElementById("status").textContent = "Takeoff data from OFP printed and loaded into message.";
+  } catch (err) {
+    document.getElementById("status").textContent = "Error: " + err.message;
+  }
 }
 
 async function printLandingData() {
