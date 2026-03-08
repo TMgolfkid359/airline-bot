@@ -1,6 +1,26 @@
 from flask import Flask, request, jsonify
 import requests
 import xml.etree.ElementTree as ET
+import os
+import sys
+
+# Ensure project root is on path for to_data (Vercel deploys full repo)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from to_data import (
+    TOData,
+    DepartureRunway,
+    TakeoffEnvironment,
+    TakeoffConfiguration,
+    AssumedConditions,
+    ReducedThrustRow,
+    MaxThrustData,
+    TakeoffLimits,
+    MelCdlItem,
+    PartialRunwayCode,
+    TakeoffNotes,
+    make_example_to_data,
+)
 
 app = Flask(__name__)
 
@@ -252,6 +272,149 @@ def poll_hoppie():
             
     except Exception as e:
         return jsonify({'error': str(e)}), 500, {'Access-Control-Allow-Origin': '*'}
+
+def _build_to_data_from_json(data):
+    """Build TOData from JSON payload."""
+    dep = data.get("departure", {})
+    env = data.get("environment", {})
+    cfg = data.get("configuration", {})
+    ass = data.get("assumed", {})
+    limits = data.get("limits", {})
+    notes = data.get("notes", {})
+
+    to_data = TOData(
+        departure=DepartureRunway(
+            airport=dep.get("airport", ""),
+            runway=dep.get("runway", ""),
+            t_proc=dep.get("t_proc", False),
+        ),
+        environment=TakeoffEnvironment(
+            climb_altitude_ft=env.get("climb_altitude_ft"),
+            airplane_engine=env.get("airplane_engine", ""),
+            temp_c=env.get("temp_c"),
+            altimeter_inhg=env.get("altimeter_inhg"),
+            wind_mag_deg=env.get("wind_mag_deg"),
+            wind_speed_kt=env.get("wind_speed_kt"),
+            headwind_kt=env.get("headwind_kt"),
+            crosswind_kt=env.get("crosswind_kt"),
+            tocg=env.get("tocg"),
+            trim=env.get("trim"),
+            runway_condition=env.get("runway_condition", "DRY"),
+        ),
+        configuration=TakeoffConfiguration(
+            flaps=cfg.get("flaps", 1),
+            bleeds_on=cfg.get("bleeds_on", True),
+            anti_ice_off=cfg.get("anti_ice_off", True),
+        ),
+        assumed=AssumedConditions(
+            assumed_weight=ass.get("assumed_weight"),
+            assumed_temp_c=ass.get("assumed_temp_c"),
+        ),
+        reduced_thrust_na=data.get("reduced_thrust_na", False),
+        limits=TakeoffLimits(
+            thr_red_ft_msl=limits.get("thr_red_ft_msl"),
+            thr_red_afe_ft=limits.get("thr_red_afe_ft"),
+            acc_alt_ft_msl=limits.get("acc_alt_ft_msl"),
+            acc_alt_afe_ft=limits.get("acc_alt_afe_ft"),
+            mtog=limits.get("mtog"),
+            vr_max=limits.get("vr_max"),
+        ),
+        notes=TakeoffNotes(
+            track_instructions=notes.get("track_instructions", ""),
+            engine_failure_procedure=notes.get("engine_failure_procedure", ""),
+        ),
+        message_identifier=data.get("message_identifier", ""),
+    )
+
+    if not to_data.reduced_thrust_na:
+        if data.get("reduced_epr_row"):
+            r = data["reduced_epr_row"]
+            to_data.reduced_epr_row = ReducedThrustRow(
+                n1=r.get("n1"),
+                headwind_kt=r.get("headwind_kt"),
+                v1=r.get("v1"),
+                vr=r.get("vr"),
+                v2=r.get("v2"),
+                n1_display=r.get("n1_display"),
+            )
+        for tw in data.get("tw_epr_rows", []):
+            to_data.tw_epr_rows.append(
+                ReducedThrustRow(
+                    n1=tw.get("n1"),
+                    tailwind_kt=tw.get("tailwind_kt"),
+                    assumed_temp_c=tw.get("assumed_temp_c"),
+                    v1=tw.get("v1"),
+                    vr=tw.get("vr"),
+                    v2=tw.get("v2"),
+                    n1_display=tw.get("n1_display"),
+                )
+            )
+        if data.get("max_epr"):
+            m = data["max_epr"]
+            to_data.max_epr = MaxThrustData(
+                n1=m.get("n1"),
+                tog=m.get("tog"),
+                v1=m.get("v1"),
+                vr=m.get("vr"),
+                v2=m.get("v2"),
+            )
+
+    for item in data.get("mel_cdl", []):
+        to_data.mel_cdl.append(
+            MelCdlItem(code=item.get("code", ""), description=item.get("description", ""))
+        )
+    for pr in data.get("partial_runway_codes", []):
+        to_data.partial_runway_codes.append(
+            PartialRunwayCode(
+                runway_intersection=pr.get("runway_intersection", ""),
+                length_ft=pr.get("length_ft"),
+                code=pr.get("code", ""),
+            )
+        )
+
+    return to_data
+
+
+@app.route('/api/to-data/example', methods=['GET', 'OPTIONS'])
+def to_data_example():
+    """Return example ACARS Takeoff Data message."""
+    if request.method == 'OPTIONS':
+        return '', 200, {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+        }
+    try:
+        to_data = make_example_to_data()
+        return jsonify({
+            'success': True,
+            'message': to_data.to_acars_message(),
+            'lines': to_data.to_acars_lines(),
+        }), 200, {'Access-Control-Allow-Origin': '*'}
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500, {'Access-Control-Allow-Origin': '*'}
+
+
+@app.route('/api/to-data/build', methods=['POST', 'OPTIONS'])
+def to_data_build():
+    """Build ACARS Takeoff Data message from JSON payload."""
+    if request.method == 'OPTIONS':
+        return '', 200, {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+        }
+    try:
+        data = request.get_json() or {}
+        to_data = _build_to_data_from_json(data)
+        return jsonify({
+            'success': True,
+            'message': to_data.to_acars_message(),
+            'lines': to_data.to_acars_lines(),
+        }), 200, {'Access-Control-Allow-Origin': '*'}
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500, {'Access-Control-Allow-Origin': '*'}
+
 
 # Vercel automatically detects and uses the Flask app instance
 # No custom handler needed - just export the app
